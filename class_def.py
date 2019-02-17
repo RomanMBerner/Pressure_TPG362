@@ -37,7 +37,7 @@ class TPG36x(object):
     This class also contains the following class variables, for the specific
     characters that are used in the communication:
 
-    :var ETX: End text (Ctrl-c), chr(3), \\x15
+    :var ETX: End text (Ctrl-c), chr(3), \\x03
     :var CR: Carriage return, chr(13), \\r
     :var LF: Line feed, chr(10), \\n
     :var ENQ: Enquiry, chr(5), \\x05
