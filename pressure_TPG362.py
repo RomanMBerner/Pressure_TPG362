@@ -11,12 +11,17 @@ from   class_def import *
 import subprocess
 import time
 
+# For PLC (need to install pymodbus: pip install pymodbus --user)
+from pymodbus.client.sync import ModbusTcpClient as ModbusClient
+from pymodbus.transaction import ModbusRtuFramer
+from struct import *
+
 # Define offset
-offset_p1 = 0
-offset_p2 = 0
+offset_p1 = 0.0
+offset_p2 = 0.0
 
 # Setting up connection
-gauge = TPG362(port='/dev/ttyUSB0')
+gauge = TPG362(port='/dev/ttyUSB2')
 
 # Print some information about the device
 gauge._send_command('AYT')
@@ -59,14 +64,28 @@ gauge._send_command('FMT,0')
 # Setting the gas to nitrogen/air (1: Ar; 2: H; 3: He; 4: Ne; 5: Kr; 6: Xe; 7: Other gases)
 gauge._send_command('GAS,0,0')
 
-# Setting the range of linear gauges to 1000 hPa (Logarithmic gauges are recognized automatically)
-gauge._send_command('FSR,5,5')
+# Setting the range of linear gauges to 2000 hPa and 1000 hPa (Logarithmic gauges are recognized automatically)
+gauge._send_command('FSR,6,5')
 
 # Setting the measurement value filter (0: Off; 1: Fast; 2: Normal; 3: Slow)
 gauge._send_command('FIL,2,2')
 
 # Save user parameters
 gauge._send_command('SAV,1')
+
+# PLC system
+PLC_IP = '130.92.139.227'
+PLC_PORT = 502
+
+# Starting address of the read/write variables inside the PLC
+PLC_base_reg = 1000
+
+# Additional variable (relative address)
+PT7_ind = (58,2) # Ambient pressure in the lab
+
+# Open connection to PLC
+PLC_client = ModbusClient(PLC_IP, port=PLC_PORT)
+PLC_client.connect()
 
 # Acquiring data
 while 1:
@@ -90,8 +109,18 @@ while 1:
         # Send data to database (only if data is of good quality, e.g. statusCode==0)
         if statusCode_p1==0 and p1>=0.:
             print "p1 =", p1, gauge.pressure_unit()
-            #post1_bar = "pressure_bar,sensor=1,pos=cryostat value=" + str(p1)
-            #subprocess.call(["curl", "-i", "-XPOST", "lhepdaq2.unibe.ch:8086/write?db=module_zero_run_jan2019", "--data-binary", post1_bar])
+            post1_bar = "pressure_bar,sensor=1,pos=atmosphere value=" + str(p1)
+            subprocess.call(["curl", "-i", "-XPOST", "lhepdaq2.unibe.ch:8086/write?db=module_zero_run_jan2019", "--data-binary", post1_bar])
+
+            # Send atmospheric pressure data to the PLC
+            if not PLC_client.is_socket_open():
+                PLC_client.connect()
+            if PLC_client.is_socket_open():
+                PT7_regs = unpack ( '<2H', pack('<f',p1/1000.) )
+                report = PLC_client.write_registers((PLC_base_reg+PT7_ind[0]),PT7_regs,count=PT7_ind[1])
+                if report.isError():
+                    print 'Error'
+
         if statusCode_p1==1: print "Sensor 1: Underrange"
         if statusCode_p1==2: print "Sensor 1: Overrange"
         if statusCode_p1==3: print "Sensor 1: Sensor error"
@@ -101,8 +130,8 @@ while 1:
 
         if statusCode_p2==0 and p2>=0.:
             print "p2 =", p2, gauge.pressure_unit()
-            #post2_bar = "pressure_bar,sensor=2,pos=cryostat value=" + str(p2)
-            #subprocess.call(["curl", "-i", "-XPOST", "lhepdaq2.unibe.ch:8086/write?db=module_zero_run_jan2019", "--data-binary", post2_bar])
+            post2_bar = "pressure_bar,sensor=2,pos=module value=" + str(p2)
+            subprocess.call(["curl", "-i", "-XPOST", "lhepdaq2.unibe.ch:8086/write?db=module_zero_run_jan2019", "--data-binary", post2_bar])
         if statusCode_p2==1: print "Sensor 2: Underrange"
         if statusCode_p2==2: print "Sensor 2: Overrange"
         if statusCode_p2==3: print "Sensor 2: Sensor error"
